@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DERIV AI - Demo Connection</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;padding:20px;background:#0b1020;color:#e8edf7;font-family:Arial,sans-serif}
+.container{max-width:650px;margin:auto}
+h1{font-size:25px;margin-bottom:5px}
+.subtitle{color:#9ba8c2;margin-top:0}
+.card{background:#151e32;border:1px solid #293650;border-radius:14px;padding:18px;margin:15px 0}
+.warning{background:#382b12;color:#ffd77a;padding:12px;border-radius:9px;font-size:13px;line-height:1.5}
+label{display:block;margin:14px 0 7px;color:#b8c5dc}
+input,select{width:100%;padding:13px;border-radius:8px;border:1px solid #394967;background:#0d1527;color:white;font-size:15px}
+button{width:100%;padding:14px;border:0;border-radius:9px;margin-top:12px;font-weight:bold;font-size:15px;cursor:pointer}
+.connect{background:#00c896;color:#061b17}.disconnect{background:#ef5350;color:white}
+.status{padding:12px;background:#0d1527;border-radius:8px;overflow-wrap:anywhere}
+.value{font-size:20px;font-weight:bold;margin-top:5px}.small{font-size:12px;color:#9ba8c2}
+pre{white-space:pre-wrap;word-break:break-word;background:#0d1527;padding:12px;border-radius:8px;color:#b9d4ff;font-size:12px;max-height:300px;overflow:auto}
+.green{color:#00dfa9}.red{color:#ff7474}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>DERIV AI</h1><p class="subtitle">Demo Connection &amp; Market Data</p>
+<div class="warning"><b>DEMO ONLY</b><br>Aplikasi ini hanya menerima akun DEMO. Akun REAL akan ditolak. Belum ada transaksi otomatis atau pembelian kontrak pada tahap ini.</div>
+<div class="card"><h3>Koneksi Deriv</h3>
+<label>Deriv API Token DEMO</label><input id="token" type="password" autocomplete="off" placeholder="Masukkan token API DEMO">
+<label>App ID</label><input id="appId" type="text" value="1089">
+<button class="connect" onclick="connectDeriv()">HUBUNGKAN AKUN DEMO</button>
+<button class="disconnect" onclick="disconnectDeriv()">PUTUSKAN KONEKSI</button></div>
+<div class="card"><h3>Status Akun</h3><div class="status" id="status">Belum terhubung</div>
+<p class="small">Login ID</p><div class="value" id="loginId">-</div><p class="small">Saldo</p><div class="value" id="balance">-</div><p class="small">Jenis akun</p><div class="value" id="accountType">-</div></div>
+<div class="card"><h3>Data Pasar</h3><label>Pilih simbol BTC</label><select id="symbol"><option value="">Menunggu daftar simbol...</option></select>
+<button class="connect" onclick="getCandles()">AMBIL CANDLE M1</button><div id="marketStatus" class="status" style="margin-top:12px">Belum ada data pasar</div><pre id="candleOutput">Data candle akan tampil di sini.</pre></div>
+<p class="small">DERIV AI — Tahap 1: koneksi akun dan pengujian data.</p>
+</div>
+<script>
+let ws=null,requestId=1,connectionGeneration=0,pendingRequests=new Map(),connected=false;
+function setStatus(message,color=""){const el=document.getElementById("status");el.textContent=message;el.className="status "+color;}
+function sendRequest(payload){return new Promise((resolve,reject)=>{if(!ws||ws.readyState!==WebSocket.OPEN){reject(new Error("Koneksi belum tersedia."));return;}const id=requestId++;payload.req_id=id;const timeout=setTimeout(()=>{pendingRequests.delete(id);reject(new Error("Permintaan timeout."));},15000);pendingRequests.set(id,{resolve,reject,timeout});ws.send(JSON.stringify(payload));});}
+function disconnectDeriv(){connectionGeneration++;connected=false;if(ws){const old=ws;ws=null;old.onclose=null;old.close();}for(const item of pendingRequests.values()){clearTimeout(item.timeout);item.reject(new Error("Koneksi diputus."));}pendingRequests.clear();document.getElementById("loginId").textContent="-";document.getElementById("balance").textContent="-";document.getElementById("accountType").textContent="-";document.getElementById("symbol").innerHTML='<option value="">Belum terhubung</option>';document.getElementById("candleOutput").textContent="Data candle akan tampil di sini.";document.getElementById("marketStatus").textContent="Belum ada data pasar";setStatus("Koneksi diputuskan");}
+async function connectDeriv(){disconnectDeriv();const tokenInput=document.getElementById("token"),token=tokenInput.value.trim(),appId=document.getElementById("appId").value.trim();if(!token||!appId){setStatus("Token dan App ID wajib diisi.","red");return;}tokenInput.value="";const generation=connectionGeneration;setStatus("Menghubungkan ke Deriv...");try{const socket=new WebSocket("wss://ws.derivws.com/websockets/v3?app_id="+encodeURIComponent(appId));ws=socket;socket.onopen=async()=>{if(generation!==connectionGeneration)return;try{setStatus("Memeriksa akun DEMO...");const response=await sendRequest({authorize:token});if(generation!==connectionGeneration)return;const account=response.authorize;if(!account||!(account.is_virtual===1||account.is_virtual===true)){setStatus("DITOLAK: Akun bukan DEMO.","red");disconnectDeriv();return;}connected=true;document.getElementById("loginId").textContent=account.loginid||"-";document.getElementById("accountType").textContent="DEMO";setStatus("Terhubung — akun DEMO","green");await getBalance(generation);await getSymbols(generation);}catch(error){if(generation!==connectionGeneration)return;setStatus("Gagal: "+error.message,"red");disconnectDeriv();}};socket.onmessage=(event)=>{let data;try{data=JSON.parse(event.data);}catch(e){return;}if(data.req_id&&pendingRequests.has(data.req_id)){const item=pendingRequests.get(data.req_id);clearTimeout(item.timeout);pendingRequests.delete(data.req_id);if(data.error)item.reject(new Error(data.error.message));else item.resolve(data);}};socket.onerror=()=>{if(generation===connectionGeneration)setStatus("Terjadi kesalahan koneksi.","red");};socket.onclose=()=>{if(generation===connectionGeneration){connected=false;setStatus("Koneksi terputus.","red");}};}catch(error){setStatus("Gagal menghubungkan: "+error.message,"red");}}
+async function getBalance(generation){const response=await sendRequest({balance:1,subscribe:0});if(generation!==connectionGeneration)return;if(!response.balance)throw new Error("Data saldo tidak ditemukan.");const b=response.balance;document.getElementById("balance").textContent=Number(b.balance).toFixed(2)+" "+(b.currency||"");}
+async function getSymbols(generation){const response=await sendRequest({active_symbols:"brief"});if(generation!==connectionGeneration)return;const symbols=response.active_symbols||[],btc=symbols.filter(item=>{const s=(item.symbol||"").toUpperCase(),d=(item.display_name||"").toUpperCase();return s.includes("BTC")||d.includes("BTC");});const select=document.getElementById("symbol");select.innerHTML="";if(!btc.length){select.innerHTML='<option value="">BTC tidak ditemukan</option>';document.getElementById("marketStatus").textContent="Simbol BTC tidak ditemukan pada daftar pasar akun ini.";return;}btc.forEach(item=>{const option=document.createElement("option");option.value=item.symbol;option.textContent=(item.display_name||item.symbol)+" ("+item.symbol+")";select.appendChild(option);});document.getElementById("marketStatus").textContent=btc.length+" simbol BTC ditemukan.";}
+async function getCandles(){if(!connected){document.getElementById("marketStatus").textContent="Hubungkan akun DEMO terlebih dahulu.";return;}const symbol=document.getElementById("symbol").value;if(!symbol){document.getElementById("marketStatus").textContent="Pilih simbol BTC terlebih dahulu.";return;}const generation=connectionGeneration;document.getElementById("marketStatus").textContent="Mengambil candle M1...";try{const response=await sendRequest({ticks_history:symbol,style:"candles",granularity:60,count:10,end:"latest"});if(generation!==connectionGeneration)return;const candles=response.candles||[];if(!candles.length)throw new Error("Respons tidak berisi candle.");const formatted=candles.map(c=>({waktu:new Date(Number(c.epoch)*1000).toLocaleString("id-ID",{timeZone:"Asia/Jakarta"}),open:Number(c.open),high:Number(c.high),low:Number(c.low),close:Number(c.close)}));document.getElementById("candleOutput").textContent=JSON.stringify(formatted,null,2);document.getElementById("marketStatus").textContent="Berhasil mengambil "+candles.length+" candle M1 untuk "+symbol+".";}catch(error){if(generation!==connectionGeneration)return;document.getElementById("marketStatus").textContent="Gagal mengambil candle: "+error.message;}}
+</script>
+</body>
+</html>
