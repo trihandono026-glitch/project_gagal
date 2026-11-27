@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deriv Bot Web v1.11</title>
+<style>
+:root{--bg:#0f1320;--card:#181e32;--line:#2a3354;--tx:#e6e9f5;--mut:#8b94b8;--ok:#2ecc71;--bad:#ff5c5c;--acc:#4c8dff}
+@media (prefers-color-scheme: light){:root{--bg:#f3f5fb;--card:#fff;--line:#d9deee;--tx:#1b2140;--mut:#6a7396}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.5 system-ui,Segoe UI,Roboto,sans-serif;padding:16px}
+.wrap{max-width:980px;margin:auto;display:grid;gap:14px;grid-template-columns:1fr 1fr}
+@media(max-width:760px){.wrap{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+.full{grid-column:1/-1}
+h1{margin:0 0 4px;font-size:20px}h2{margin:0 0 10px;font-size:14px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em}
+label{display:block;font-size:12px;color:var(--mut);margin:8px 0 3px}
+input,select{width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--tx)}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+button{padding:10px 14px;border:0;border-radius:8px;font-weight:600;cursor:pointer;color:#fff;background:var(--acc)}
+button.go{background:var(--ok)}button.stop{background:var(--bad)}button:disabled{opacity:.4;cursor:not-allowed}
+.btns{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+@media(max-width:760px){.stats{grid-template-columns:repeat(2,1fr)}}
+.stat{background:var(--bg);border-radius:8px;padding:8px 10px}.stat b{display:block;font-size:18px}.stat span{font-size:11px;color:var(--mut)}
+#log{height:240px;overflow:auto;font:12px/1.5 ui-monospace,Consolas,monospace;background:var(--bg);border-radius:8px;padding:8px}
+.pos{color:var(--ok)}.neg{color:var(--bad)}.warn{background:#ffb84d22;border:1px solid #ffb84d;border-radius:8px;padding:8px 10px;font-size:12px;margin-top:10px}
+.badge{display:inline-block;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700}
+.demo{background:#2ecc7133;color:var(--ok)}.real{background:#ff5c5c33;color:var(--bad)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card full">
+    <h1>Deriv Bot Web <span id="ver" class="badge demo" style="font-size:12px"></span> <span id="acctBadge"></span></h1>
+    <div style="color:var(--mut)">Strategi EMA crossover + filter RSI · kontrak Rise/Fall · berjalan 100% di browser Anda</div>
+    <div class="warn">Gunakan akun <b>DEMO</b> dan PAT dengan scope <b>trade</b>. Token hanya disimpan di memori tab ini, tidak dikirim ke mana pun selain server Deriv. Tidak ada bot yang menjamin profit.</div>
+  </div>
+
+  <div class="card full" style="text-align:center">
+    <div id="sigMkt" style="font-size:16px;font-weight:700">-</div>
+    <div style="color:var(--mut);font-size:13px">Next Candle</div>
+    <div id="sigDir" style="font-size:46px;font-weight:800;line-height:1.2;color:var(--mut)">-</div>
+    <div id="sigTf" style="font-size:16px;font-weight:700">-</div>
+    <div id="sigTime" style="color:var(--mut);font-size:12px;margin-top:4px">Menunggu koneksi</div>
+  </div>
+
+  <div class="card">
+    <h2>Koneksi</h2>
+    <label>PAT Token (dari developers.deriv.com)</label>
+    <input id="token" type="password" placeholder="Tempel PAT token di sini" autocomplete="off">
+    <label>App ID baru (tipe PAT, bukan 1089)</label>
+    <input id="appid" placeholder="App ID dari developers.deriv.com" autocomplete="off">
+    <label>Account ID demo (opsional, kosongkan agar otomatis)</label>
+    <input id="accId" placeholder="contoh: DOT12345678" autocomplete="off">
+    <div class="btns">
+      <button id="btnConnect">Hubungkan</button>
+      <button id="btnDisc" class="stop" disabled>Putus</button>
+    </div>
+    <div style="margin-top:10px;color:var(--mut)" id="acctInfo">Belum terhubung</div>
+  </div>
+
+  <div class="card">
+    <h2>Strategi & Kontrak</h2>
+    <div class="row">
+      <div><label>Market</label>
+        <select id="symbol">
+          <optgroup label="Volatility (24/7)">
+            <option value="R_10">Volatility 10</option>
+            <option value="R_25">Volatility 25</option>
+            <option value="R_50">Volatility 50</option>
+            <option value="R_75">Volatility 75</option>
+            <option value="R_100" selected>Volatility 100</option>
+            <option value="1HZ100V">Volatility 100 (1s)</option>
+          </optgroup>
+          <optgroup label="Crypto (24/7)">
+            <option value="cryBTCUSD">BTC/USD</option>
+            <option value="cryETHUSD">ETH/USD</option>
+          </optgroup>
+          <optgroup label="Forex & Komoditas (jam pasar)">
+            <option value="frxEURUSD">EUR/USD</option>
+            <option value="frxGBPUSD">GBP/USD</option>
+            <option value="frxUSDJPY">USD/JPY</option>
+            <option value="frxXAUUSD">Emas XAU/USD</option>
+          </optgroup>
+        </select></div>
+      <div><label>Timeframe candle</label>
+        <select id="gran"><option value="60" selected>1 menit</option><option value="120">2 menit</option><option value="300">5 menit</option></select></div>
+    </div>
+    <div class="row">
+      <div><label>EMA cepat</label><input id="emaF" type="number" value="9"></div>
+      <div><label>EMA lambat</label><input id="emaS" type="number" value="21"></div>
+    </div>
+    <div class="row">
+      <div><label>Periode RSI</label><input id="rsiP" type="number" value="14"></div>
+      <div><label>RSI batas atas / bawah</label><input id="rsiB" value="70/30"></div>
+    </div>
+    <div class="row">
+      <div><label>Mode sinyal</label>
+        <select id="mode"><option value="always" selected>Sinyal tiap candle (BUY/SELL selalu)</option><option value="pull">Trend + Pullback (selektif)</option><option value="cross">Crossover (jarang, ketat)</option></select></div>
+      <div><label>Min. jarak EMA (% harga)</label><input id="minGap" type="number" step="0.001" value="0.02"></div>
+    </div>
+    <div class="row">
+      <div><label>Jeda candle setelah kalah</label><input id="pauseN" type="number" value="0"></div>
+      <div><label>Entry minimal kekuatan sinyal</label>
+        <select id="minStr"><option value="1" selected>&#9195; semua sinyal</option><option value="2">&#9195;&#9195; ke atas</option><option value="3">&#9195;&#9195;&#9195; saja</option></select></div>
+    </div>
+    <div class="row">
+      <div><label>Durasi</label><input id="dur" type="number" value="55"></div>
+      <div><label>Satuan</label><select id="durU"><option value="s" selected>Detik</option><option value="m">Menit</option><option value="t">Tick</option><option value="d">Hari</option></select></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Manajemen Risiko</h2>
+    <div class="row">
+      <div><label>Stake per trade</label><input id="stake" type="number" step="0.01" value="1"></div>
+      <div><label>Batas rugi harian</label><input id="maxLoss" type="number" step="0.01" value="10"></div>
+    </div>
+    <div class="row">
+      <div><label>Target profit harian</label><input id="target" type="number" step="0.01" value="10"></div>
+      <div><label>Stop setelah rugi beruntun</label><input id="maxStreak" type="number" value="8"></div>
+    </div>
+    <div class="row">
+      <div><label>Jeda antar trade (detik)</label><input id="cool" type="number" value="5"></div>
+      <div><label>Martingale</label><select id="mg"><option value="off" selected>Mati (disarankan)</option><option value="on">Aktif x2 maks 3 kali</option></select></div>
+    </div>
+    <div class="row">
+      <div><label>Maks kontrak bersamaan</label><input id="maxOpen" type="number" min="1" value="1"></div>
+      <div></div>
+    </div>
+    <div class="btns">
+      <button id="btnStart" class="go" disabled>Mulai Bot</button>
+      <button id="btnStop" class="stop" disabled>Hentikan</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Statistik Sesi</h2>
+    <div class="stats">
+      <div class="stat"><span>Saldo</span><b id="sBal">-</b></div>
+      <div class="stat"><span>P/L sesi</span><b id="sPnl">0.00</b></div>
+      <div class="stat"><span>Menang / Kalah</span><b id="sWL">0 / 0</b></div>
+      <div class="stat"><span>Win rate</span><b id="sWR">-</b></div>
+      <div class="stat"><span>Harga terakhir</span><b id="sPx">-</b></div>
+      <div class="stat"><span>EMA cepat/lambat</span><b id="sEma" style="font-size:13px">-</b></div>
+      <div class="stat"><span>RSI</span><b id="sRsi">-</b></div>
+      <div class="stat"><span>Status</span><b id="sSt" style="font-size:13px">Idle</b></div>
+      <div class="stat"><span>Jam sekarang</span><b id="sClock" style="font-size:15px">-</b></div>
+      <div class="stat"><span>Candle baru dalam</span><b id="sNext" style="font-size:15px">-</b></div>
+      <div class="stat"><span>Terakhir dinilai</span><b id="sEval" style="font-size:15px">-</b></div>
+      <div class="stat"><span>Market / TF</span><b id="sMkt" style="font-size:13px">-</b></div>
+    </div>
+  </div>
+
+  <div class="card full">
+    <h2>Grafik</h2>
+    <canvas id="chart" style="width:100%;height:340px;display:block"></canvas>
+    <div style="font-size:12px;color:var(--mut);margin-top:6px">
+      <span style="color:#4c8dff">&#9632;</span> EMA cepat &nbsp;
+      <span style="color:#ffb84d">&#9632;</span> EMA lambat &nbsp;
+      &#9650; entry CALL &nbsp; &#9660; entry PUT &nbsp; (abu-abu: berjalan, hijau: menang, merah: kalah)
+    </div>
+  </div>
+
+  <div class="card full">
+    <h2>Log</h2>
+    <div id="log"></div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  let ws, authorized = false, running = false, isDemo = false, currency = 'USD';
+  let closes = [], lastOpen = null, openMap = {}, busy = false, lastTradeAt = 0;
+  let durTries = 0, warnedDur = false;
+  const openCount = () => Object.keys(openMap).length;
+  const DUR_SEQ = [[60,'s'],[90,'s'],[120,'s'],[180,'s'],[300,'s'],[600,'s'],[900,'s'],[1800,'s'],[3600,'s'],[5,'t'],[10,'t'],[1,'d']];
+  const blockedSyms = {};
+  const parseDur = v => { const mm = /^(\d+)\s*([smhdt])$/i.exec(String(v || '').trim()); return mm ? { n: +mm[1], u: mm[2].toLowerCase() } : null; };
+  const durSecs = d => d.u === 's' ? d.n : d.u === 'm' ? d.n * 60 : d.u === 'h' ? d.n * 3600 : d.u === 'd' ? d.n * 86400 : null;
+  function nextDur(du, un) {
+    const i = DUR_SEQ.findIndex(x => x[0] === du && x[1] === un);
+    if (i >= 0) return DUR_SEQ[i + 1] || null;
+    if (un === 'm' || un === 's') { const cur = un === 'm' ? du * 60 : du; return DUR_SEQ.find(x => x[1] === 's' && x[0] > cur) || DUR_SEQ.find(x => x[1] === 't'); }
+    if (un === 't') return DUR_SEQ.find(x => x[1] === 'd') || null;
+    return null;
+  }
+  let pnl = 0, wins = 0, losses = 0, streak = 0, mgStep = 0, pendingSide = null;
+  let candleCount = 0, pauseUntil = 0;
+  let candles = [], markers = [], rafP = false, lastStrength = 3;
+  let candleSub = null, candleTry = 0, watchT = null;
+  const skip = why => { if (running && !openCount()) $('sSt').textContent = 'Skip: ' + why; return null; };
+  let reqId = 1, pingTimer;
+
+  const log = (m, c) => {
+    const d = document.createElement('div');
+    d.textContent = new Date().toLocaleTimeString() + '  ' + m;
+    if (c) d.className = c;
+    $('log').prepend(d);
+    while ($('log').children.length > 300) $('log').lastChild.remove();
+  };
+  const send = o => ws && ws.readyState === 1 && ws.send(JSON.stringify(o));
+
+  // ---------- indikator ----------
+  const ema = (arr, p) => {
+    if (arr.length < p) return [];
+    const k = 2 / (p + 1);
+    let e = arr.slice(0, p).reduce((a, b) => a + b, 0) / p;
+    const out = [e];
+    for (let i = p; i < arr.length; i++) { e = arr[i] * k + e * (1 - k); out.push(e); }
+    return out;
+  };
+  const rsi = (arr, p) => {
+    if (arr.length <= p) return null;
+    let g = 0, l = 0;
+    for (let i = 1; i <= p; i++) { const d = arr[i] - arr[i - 1]; d >= 0 ? g += d : l -= d; }
+    g /= p; l /= p;
+    for (let i = p + 1; i < arr.length; i++) {
+      const d = arr[i] - arr[i - 1];
+      g = (g * (p - 1) + (d > 0 ? d : 0)) / p;
+      l = (l * (p - 1) + (d < 0 ? -d : 0)) / p;
+    }
+    return l === 0 ? 100 : 100 - 100 / (1 + g / l);
+  };
+
+  function signalAlways(f, s, rp, hi, lo) {
+    const cl = closes.slice(0, -1), n = cl.length;
+    const F = ema(cl, f), S = ema(cl, s);
+    if (F.length < 5 || S.length < 5 || n < rp + 3) { lastStrength = 0; return null; }
+    const fa = F[F.length - 1], sa = S[S.length - 1], px = cl[n - 1];
+    const candleUp = cl[n - 1] >= cl[n - 2];
+    const buy = fa > sa ? true : fa < sa ? false : candleUp;
+    const slope = sa - S[S.length - 4];
+    const rNow = rsi(cl, rp), rPrev = rsi(cl.slice(0, -1), rp);
+    const gap = Math.abs(fa - sa) / px * 100;
+    let pts = 0;
+    if (buy ? slope > 0 : slope < 0) pts++;
+    if (buy ? (rNow > rPrev && rNow < (hi || 70)) : (rNow < rPrev && rNow > (lo || 30))) pts++;
+    if (buy ? candleUp : !candleUp) pts++;
+    if (gap >= +$('minGap').value) pts++;
+    lastStrength = pts >= 4 ? 3 : pts >= 2 ? 2 : 1;
+    return buy ? 'CALL' : 'PUT';
+  }
+
+  function showSignal(sig, st) {
+    $('sigMkt').textContent = $('symbol').selectedOptions[0].text;
+    $('sigTf').textContent = (+$('gran').value / 60) + ' MENIT';
+    const el = $('sigDir');
+    if (!sig) { el.textContent = 'MENUNGGU DATA'; el.style.color = 'var(--mut)'; el.style.fontSize = '26px'; }
+    else {
+      el.style.fontSize = '46px';
+      el.textContent = (sig === 'CALL' ? 'BUY ' : 'SELL ') + (sig === 'CALL' ? '\u23EB' : '\u23EC').repeat(Math.max(1, st));
+      el.style.color = sig === 'CALL' ? 'var(--ok)' : 'var(--bad)';
+    }
+    $('sigTime').textContent = 'Dihitung ' + new Date().toLocaleTimeString() + ' \u00B7 berlaku untuk candle berikutnya';
+  }
+
+  function evaluate() {
+    const f = +$('emaF').value, s = +$('emaS').value, rp = +$('rsiP').value;
+    const [hi, lo] = $('rsiB').value.split('/').map(Number);
+    const ef = ema(closes, f), es = ema(closes, s), r = rsi(closes, rp);
+    if (ef.length < 2 || es.length < 2 || r === null) return null;
+    const a = ef[ef.length - 1], b = es[es.length - 1];
+    const a0 = ef[ef.length - 2], b0 = es[es.length - 2];
+    $('sEma').textContent = a.toFixed(3) + ' / ' + b.toFixed(3);
+    $('sRsi').textContent = r.toFixed(1);
+    lastStrength = 3;
+    if ($('mode').value === 'always') return signalAlways(f, s, rp, hi, lo);
+    if ($('mode').value === 'cross') {
+      if (a0 <= b0 && a > b && r < (hi || 70)) return 'CALL';
+      if (a0 >= b0 && a < b && r > (lo || 30)) return 'PUT';
+      return null;
+    }
+
+    // ---- Trend + Pullback: hanya memakai candle yang sudah close ----
+    const cl = closes.slice(0, -1), n = cl.length;
+    const F = ema(cl, f), S = ema(cl, s);
+    if (F.length < 5 || S.length < 5 || n < rp + 8) return skip('data belum cukup');
+    const fa = F[F.length - 1], sa = S[S.length - 1];
+    const px = cl[n - 1];
+    const gap = Math.abs(fa - sa) / px * 100;
+    if (gap < +$('minGap').value) return skip('pasar sideways');
+    const slope = sa - S[S.length - 4];
+    let rMin = 100, rMax = 0;
+    for (let i = 0; i < 5; i++) {
+      const v = rsi(cl.slice(0, n - i), rp);
+      if (v < rMin) rMin = v;
+      if (v > rMax) rMax = v;
+    }
+    const rNow = rsi(cl, rp), rPrev = rsi(cl.slice(0, -1), rp);
+    const up = cl[n - 1] > cl[n - 2], down = cl[n - 1] < cl[n - 2];
+    if (fa > sa && slope > 0) {
+      if (rMin < 45 && rNow > rPrev && rNow >= 40 && rNow < (hi || 70) && up) return 'CALL';
+      return skip('uptrend, tunggu pullback + pantulan');
+    }
+    if (fa < sa && slope < 0) {
+      if (rMax > 55 && rNow < rPrev && rNow <= 60 && rNow > (lo || 30) && down) return 'PUT';
+      return skip('downtrend, tunggu pullback + pantulan');
+    }
+    return skip('tren belum jelas');
+  }
+
+  // ---------- risiko ----------
+  function riskOk() {
+    const maxLoss = +$('maxLoss').value, target = +$('target').value, maxStreak = +$('maxStreak').value;
+    if (maxLoss > 0 && pnl <= -maxLoss) return stopBot('Batas rugi harian tercapai');
+    if (target > 0 && pnl >= target) return stopBot('Target profit tercapai');
+    if (maxStreak > 0 && streak >= maxStreak) return stopBot('Rugi beruntun mencapai batas');
+    return true;
+  }
+  function stopBot(reason) {
+    running = false;
+    $('btnStart').disabled = !authorized; $('btnStop').disabled = true;
+    $('sSt').textContent = 'Berhenti';
+    if (reason) log('BOT BERHENTI: ' + reason, 'warn');
+    return false;
+  }
+  const currentStake = () => {
+    let s = +$('stake').value;
+    if ($('mg').value === 'on') s *= Math.pow(2, Math.min(mgStep, 3));
+    return +s.toFixed(2);
+  };
+
+  // ---------- trading ----------
+  function trade(side) {
+    if (openCount() >= Math.max(1, +$('maxOpen').value || 1)) { log('Sinyal dilewati: batas kontrak bersamaan tercapai (' + openCount() + ' berjalan)', 'warn'); return; }
+    if (busy) return;
+    if (blockedSyms[$('symbol').value]) { $('sSt').textContent = 'Market tidak didukung'; return; }
+    if ((Date.now() - lastTradeAt) / 1000 < +$('cool').value) return;
+    if (!riskOk()) return;
+    busy = true; pendingSide = side;
+    $('sSt').textContent = 'Meminta harga ' + side;
+    send({
+      proposal: 1, req_id: ++reqId, amount: currentStake(), basis: 'stake',
+      contract_type: side, currency, duration: +$('dur').value,
+      duration_unit: $('durU').value, underlying_symbol: $('symbol').value
+    });
+  }
+
+  function onMessage(m) {
+    if (m.error) {
+      log('ERROR [' + m.error.code + ']: ' + m.error.message + (m.msg_type ? ' {' + m.msg_type + '}' : '') + (m.echo_req ? ' | ' + JSON.stringify(m.echo_req).slice(0, 170) : ''), 'neg');
+      if (m.msg_type === 'proposal' && m.error.code === 'TradingDurationNotAllowed' && pendingSide && durTries < 14) {
+        const sym = $('symbol').value;
+        const nx = nextDur(+$('dur').value, $('durU').value);
+        if (nx) {
+          durTries++; $('dur').value = nx[0]; $('durU').value = nx[1];
+          log('Durasi ditolak, mencoba ' + nx[0] + ' ' + ({ s: 'detik', t: 'tick', d: 'hari', m: 'menit' })[nx[1]], 'warn');
+          busy = false; lastTradeAt = 0; trade(pendingSide); return;
+        }
+        blockedSyms[sym] = true;
+        $('dur').value = 55; $('durU').value = 's'; durTries = 0;
+        log('Market ' + sym + ' menolak semua durasi Rise/Fall di akun ini (detik, tick, hari). Bot berhenti mencoba market ini. Pilih market lain, misalnya Volatility 100.', 'neg');
+        busy = false; $('sSt').textContent = 'Market tidak didukung'; return;
+      }
+      if (((m.echo_req && m.echo_req.ticks_history) || m.msg_type === 'candles' || m.msg_type === 'history') && candleTry < 2) {
+        candleTry++; log('Mencoba format permintaan candle alternatif #' + candleTry, 'warn'); subscribeCandles(candleTry);
+      }
+      if (m.msg_type === 'proposal' || m.msg_type === 'buy') { busy = false; $('sSt').textContent = running ? 'Menunggu sinyal' : 'Idle'; }
+      if (m.msg_type === 'authorize') disconnect();
+      return;
+    }
+    switch (m.msg_type) {
+      case 'contracts_for': {
+        const sym = $('symbol').value, g = +$('gran').value;
+        const av = (m.contracts_for && m.contracts_for.available) || [];
+        if (!av.length) { log('contracts_for kosong untuk ' + sym, 'warn'); break; }
+        const cp = av.filter(a => a.contract_category === 'callput' && (a.contract_type === 'CALL' || a.contract_type === 'PUT'));
+        if (!cp.length) {
+          blockedSyms[sym] = true;
+          log('Market ' + sym + ' tidak menyediakan Rise/Fall (CALL/PUT). Kontrak tersedia: ' + Array.from(new Set(av.map(a => a.contract_type))).join(', ') + '. Pilih market lain, misalnya Volatility 100.', 'warn');
+          break;
+        }
+        const calls = cp.filter(a => a.contract_type === 'CALL');
+        log('Rise/Fall ' + sym + ' (jenis/min-maks): ' + calls.slice(0, 4).map(a => (a.expiry_type || '?') + ' ' + (a.min_contract_duration || '?') + '-' + (a.max_contract_duration || '?')).join(' | '));
+        let best = null;
+        calls.forEach(a => {
+          const d = parseDur(a.min_contract_duration); if (!d) return;
+          const sc = d.u === 't' ? d.n * 2 : durSecs(d);
+          if (best === null || sc < best.sc) best = { d, sc };
+        });
+        if (best) {
+          const d = best.d;
+          if (d.u === 't') { $('dur').value = d.n; $('durU').value = 't'; }
+          else if (d.u === 'd') { $('dur').value = d.n; $('durU').value = 'd'; }
+          else if (best.sc <= g - 5) { $('dur').value = g - 5; $('durU').value = 's'; }
+          else if (d.u === 'm') { $('dur').value = d.n; $('durU').value = 'm'; }
+          else { $('dur').value = best.sc; $('durU').value = 's'; }
+          log('Durasi diatur otomatis: ' + $('dur').value + ' ' + ({ s: 'detik', t: 'tick', d: 'hari', m: 'menit' })[$('durU').value] + ' (minimum market: ' + d.n + d.u + ')', 'pos');
+        }
+        break;
+      }
+      case 'balance': currency = m.balance.currency; $('sBal').textContent = m.balance.balance + ' ' + m.balance.currency; break;
+      case 'candles':
+        if (m.subscription) candleSub = m.subscription.id;
+        closes = m.candles.map(c => +c.close);
+        candles = m.candles.map(c => ({ t: +c.epoch, o: +c.open, h: +c.high, l: +c.low, c: +c.close }));
+        redraw();
+        lastOpen = m.candles[m.candles.length - 1].epoch;
+        showSignal(evaluate(), lastStrength);
+        $('sPx').textContent = closes[closes.length - 1];
+        log('Memuat ' + closes.length + ' candle awal');
+        break;
+      case 'ohlc': {
+        const o = m.ohlc;
+        $('sPx').textContent = o.close;
+        const cd = { t: +o.open_time, o: +o.open, h: +o.high, l: +o.low, c: +o.close };
+        if (lastOpen !== null && +o.open_time !== lastOpen) {
+          candles.push(cd); if (candles.length > 300) candles.shift();
+          // candle sebelumnya sudah close; closes[-1] adalah nilai terakhir candle lama
+          lastOpen = +o.open_time;
+          closes.push(+o.close);
+          candleCount++;
+          if (closes.length > 300) closes.shift();
+          const sig = evaluate();
+          showSignal(sig, lastStrength);
+          log('Candle baru → ' + (sig ? (sig === 'CALL' ? 'BUY' : 'SELL') + ' (kekuatan ' + lastStrength + ')' : 'belum ada sinyal') + (running ? '' : ' · bot belum dimulai (klik Mulai Bot)'));
+          const weak = sig && lastStrength < +$('minStr').value;
+          if (running && weak) { log('Sinyal ' + sig + ' dilewati (kekuatan di bawah batas)'); }
+          else if (running && sig && candleCount < pauseUntil) { log('Sinyal ' + sig + ' dilewati (jeda setelah kalah)'); }
+          else if (running && sig) { log('Sinyal ' + sig, sig === 'CALL' ? 'pos' : 'neg'); trade(sig); }
+          $('sEval').textContent = new Date().toLocaleTimeString();
+        } else {
+          closes[closes.length - 1] = +o.close;
+          if (candles.length) candles[candles.length - 1] = cd;
+        }
+        redraw();
+        break;
+      }
+      case 'proposal':
+        if (!busy || !pendingSide) return;
+        send({ buy: m.proposal.id, price: m.proposal.ask_price, req_id: ++reqId });
+        break;
+      case 'buy':
+        busy = false;
+        durTries = 0; lastTradeAt = Date.now();
+        { const mk = { t: lastOpen, side: pendingSide, price: closes[closes.length - 1], res: null };
+          openMap[m.buy.contract_id] = mk; markers.push(mk); redraw(); }
+        log('Entry ' + pendingSide + ' stake ' + m.buy.buy_price + ' (#' + m.buy.contract_id + ') \u00B7 berjalan: ' + openCount());
+        $('sSt').textContent = 'Kontrak berjalan (' + openCount() + ')';
+        send({ proposal_open_contract: 1, contract_id: m.buy.contract_id, subscribe: 1 });
+        { const du = +$('dur').value, un = $('durU').value, ds = un === 'm' ? du * 60 : un === 's' ? du : 0, g = +$('gran').value;
+          if (!warnedDur && ds > g + 5 && (+$('maxOpen').value || 1) < Math.ceil(ds / g)) {
+            warnedDur = true;
+            log('Catatan: durasi ' + ds + ' detik lebih panjang dari candle ' + g + ' detik. Agar entry tiap candle, naikkan "Maks kontrak bersamaan" ke ' + Math.ceil(ds / g) + ' (risiko ikut naik).', 'warn');
+          } }
+        break;
+      case 'proposal_open_contract': {
+        const c = m.proposal_open_contract;
+        if (c && c.is_sold && openMap[c.contract_id]) {
+          const p = +c.profit;
+          pnl += p;
+          if (p > 0) { wins++; streak = 0; mgStep = 0; } else { losses++; streak++; mgStep++; pauseUntil = candleCount + (+$('pauseN').value || 0); }
+          log('Hasil: ' + (p >= 0 ? '+' : '') + p.toFixed(2) + ' ' + currency, p >= 0 ? 'pos' : 'neg');
+          if (m.subscription) send({ forget: m.subscription.id });
+          openMap[c.contract_id].res = p > 0 ? 'w' : 'l'; delete openMap[c.contract_id]; redraw();
+          updateStats();
+          $('sSt').textContent = openCount() ? 'Kontrak berjalan (' + openCount() + ')' : (running ? 'Menunggu sinyal' : 'Idle');
+          if (running) riskOk();
+        }
+        break;
+      }
+    }
+  }
+
+  function updateStats() {
+    $('sPnl').textContent = pnl.toFixed(2);
+    $('sPnl').className = pnl >= 0 ? 'pos' : 'neg';
+    $('sWL').textContent = wins + ' / ' + losses;
+    const t = wins + losses;
+    $('sWR').textContent = t ? (wins / t * 100).toFixed(1) + '%' : '-';
+  }
+
+  function subscribeCandles(variant) {
+    variant = variant || 0;
+    const sym = $('symbol').value, g = +$('gran').value;
+    if (variant === 0) {
+      if (candleSub) { send({ forget: candleSub }); candleSub = null; }
+      closes = []; lastOpen = null; candles = []; markers = []; candleTry = 0; durTries = 0; warnedDur = false; delete blockedSyms[sym];
+      send({ contracts_for: sym, req_id: ++reqId });
+      $('sMkt').textContent = sym + ' / ' + (g / 60) + 'm';
+    }
+    const base = { ticks_history: sym, end: 'latest', style: 'candles', granularity: g, subscribe: 1 };
+    const req = variant === 0 ? Object.assign({}, base, { count: 200, adjust_start_time: 1 })
+      : variant === 1 ? Object.assign({}, base, { count: 200 })
+      : Object.assign({}, base, { start: Math.floor(Date.now() / 1000) - 200 * g });
+    send(req);
+    clearTimeout(watchT);
+    watchT = setTimeout(() => { if (!candles.length) log('Data candle belum masuk setelah 15 detik. Bot belum bisa menghitung sinyal.', 'warn'); }, 15000);
+  }
+
+  // ---------- koneksi ----------
+  const API = 'https://api.derivws.com';
+  const apiErr = (j, st) => (j && j.errors && j.errors[0]) ? j.errors[0].code + ': ' + j.errors[0].message : 'HTTP ' + st;
+
+  async function connect() {
+    const clean = v => v.replace(/[\s\u200B-\u200D\uFEFF\u00A0]/g, '').replace(/^Bearer/i, '');
+    const tk = clean($('token').value), app = clean($('appid').value);
+    const bad = v => /[^\x21-\x7E]/.test(v);
+    const fail = msg => { log(msg, 'neg'); $('acctInfo').textContent = 'Gagal: ' + msg; $('acctInfo').className = 'neg'; };
+    if (!tk || !app) return fail('Isi PAT token dan App ID baru dulu');
+    if (bad(tk)) return fail('PAT token mengandung karakter yang tidak valid (mungkin tertempel teks lain, tanda kutip, atau tanda baca khusus). Hapus isi kolom lalu salin ulang token saja.');
+    if (bad(app)) return fail('App ID mengandung karakter yang tidak valid. Hapus isi kolom lalu salin ulang App ID saja.');
+    $('token').value = tk; $('appid').value = app;
+    $('btnConnect').disabled = true;
+    const H = { 'Authorization': 'Bearer ' + tk, 'Deriv-App-ID': app };
+    try {
+      let acc = clean($('accId').value);
+      if (!acc) {
+        log('Mengambil daftar akun...');
+        const r = await fetch(API + '/trading/v1/options/accounts', { headers: H });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(apiErr(j, r.status));
+        log('Respons akun: ' + JSON.stringify(j).slice(0, 600));
+        const list = Array.isArray(j.data) ? j.data
+          : (j.data && Array.isArray(j.data.accounts)) ? j.data.accounts
+          : Array.isArray(j.accounts) ? j.accounts
+          : (Object.values(j.data || j).find(Array.isArray) || []);
+        const idOf = a => a.account_id || a.loginid || a.id;
+        log('Akun ditemukan: ' + (list.map(idOf).join(', ') || 'tidak ada'));
+        const isDemoAcc = a => /demo|virtual/i.test(JSON.stringify(a)) || /^VRT/i.test(String(idOf(a) || ''));
+        const demo = list.find(isDemoAcc) || (list.length === 1 ? list[0] : null);
+        if (!demo) throw new Error('Akun demo tidak terdeteksi. Isi kolom Account ID demo secara manual.');
+        acc = idOf(demo);
+        if (!acc) throw new Error('ID akun tidak terbaca dari respons. Isi kolom Account ID secara manual.');
+      }
+      log('Meminta akses WebSocket untuk ' + acc + '...');
+      $('acctInfo').textContent = 'Menghubungkan ke ' + acc + '...'; $('acctInfo').className = '';
+      const r2 = await fetch(API + '/trading/v1/options/accounts/' + encodeURIComponent(acc) + '/otp', { method: 'POST', headers: H });
+      const j2 = await r2.json().catch(() => ({}));
+      if (!r2.ok) throw new Error(apiErr(j2, r2.status));
+      const url = j2.data && j2.data.url;
+      if (!url) throw new Error('URL WebSocket tidak ada di respons');
+      isDemo = url.indexOf('/ws/demo') !== -1;
+      openWs(url, acc);
+    } catch (e) {
+      log('Gagal terhubung: ' + e.message, 'neg');
+      $('acctInfo').textContent = 'Gagal: ' + e.message; $('acctInfo').className = 'neg';
+      if (e instanceof TypeError) log('Permintaan ke api.derivws.com gagal (jaringan/CORS). Coba tanpa VPN/adblock, atau kabari saya untuk versi dengan proxy.', 'warn');
+      $('btnConnect').disabled = false;
+    }
+  }
+
+  function openWs(url, acc) {
+    ws = new WebSocket(url);
+    ws.onopen = () => {
+      authorized = true;
+      log('WebSocket terhubung (' + (isDemo ? 'DEMO' : 'REAL') + ')', 'pos');
+      $('acctInfo').textContent = acc; $('acctInfo').className = 'pos';
+      $('acctBadge').innerHTML = '<span class="badge ' + (isDemo ? 'demo' : 'real') + '">' + (isDemo ? 'DEMO' : 'REAL') + '</span>';
+      if (!isDemo) log('PERINGATAN: ini akun REAL. Disarankan memakai akun demo.', 'warn');
+      $('btnStart').disabled = false; $('btnDisc').disabled = false; $('btnConnect').disabled = true;
+      send({ balance: 1, subscribe: 1 });
+      subscribeCandles();
+      pingTimer = setInterval(() => send({ ping: 1 }), 25000);
+    };
+    ws.onmessage = e => onMessage(JSON.parse(e.data));
+    ws.onclose = () => { log('Koneksi terputus'); cleanup(); };
+    ws.onerror = () => log('Kesalahan WebSocket', 'neg');
+  }
+  function cleanup() {
+    clearInterval(pingTimer);
+    authorized = false; running = false; busy = false; openMap = {};
+    $('btnConnect').disabled = false; $('btnDisc').disabled = true;
+    $('btnStart').disabled = true; $('btnStop').disabled = true;
+    $('sSt').textContent = 'Idle'; $('acctInfo').textContent = 'Belum terhubung'; $('acctBadge').innerHTML = '';
+  }
+  function disconnect() { if (ws) ws.close(); cleanup(); $('token').value = ''; }
+
+  function redraw() { if (!rafP) { rafP = true; requestAnimationFrame(() => { rafP = false; draw(); }); } }
+
+  function draw() {
+    const cv = $('chart'); if (!cv) return;
+    const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+    if (!W || !H) return;
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+    const g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+    if (!candles.length) { g.fillStyle = '#8b94b8'; g.font = '13px system-ui'; g.fillText('Grafik muncul setelah terhubung ke Deriv', 12, 24); return; }
+    const cs = getComputedStyle(document.body);
+    const tx = cs.getPropertyValue('--mut').trim() || '#8b94b8', ln = cs.getPropertyValue('--line').trim() || '#2a3354';
+    const UP = cs.getPropertyValue('--ok').trim() || '#2ecc71', DN = cs.getPropertyValue('--bad').trim() || '#ff5c5c';
+    const N = Math.min(candles.length, 80), vis = candles.slice(-N), off = candles.length - N;
+    const padL = 8, padR = 70, padT = 10, padB = 22;
+    let lo = Infinity, hi = -Infinity;
+    vis.forEach(c => { if (c.l < lo) lo = c.l; if (c.h > hi) hi = c.h; });
+    const rng = (hi - lo) || 1; lo -= rng * 0.06; hi += rng * 0.06;
+    const cw = (W - padL - padR) / N;
+    const X = i => padL + (i + 0.5) * cw, Y = p => padT + (hi - p) / (hi - lo) * (H - padT - padB);
+    const last = candles[candles.length - 1];
+    const dec = Math.min(5, (String(last.c).split('.')[1] || '').length);
+
+    g.font = '11px system-ui'; g.lineWidth = 1;
+    for (let k = 0; k <= 4; k++) {
+      const pr = lo + (hi - lo) * k / 4, y = Math.round(Y(pr)) + 0.5;
+      g.strokeStyle = ln; g.beginPath(); g.moveTo(padL, y); g.lineTo(W - padR, y); g.stroke();
+      g.fillStyle = tx; g.fillText(pr.toFixed(dec), W - padR + 6, y + 4);
+    }
+    const step = Math.max(1, Math.round(N / 6));
+    for (let i = 0; i < N; i += step) {
+      const d = new Date(vis[i].t * 1000);
+      g.fillStyle = tx; g.fillText(d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), X(i) - 14, H - 6);
+    }
+    vis.forEach((c, i) => {
+      const col = c.c >= c.o ? UP : DN, x = X(i);
+      g.strokeStyle = col; g.fillStyle = col;
+      g.beginPath(); g.moveTo(x, Y(c.h)); g.lineTo(x, Y(c.l)); g.stroke();
+      const yo = Y(c.o), yc = Y(c.c);
+      g.fillRect(x - cw * 0.35, Math.min(yo, yc), cw * 0.7, Math.max(1, Math.abs(yo - yc)));
+    });
+    const line = (arr, per, col) => {
+      g.strokeStyle = col; g.lineWidth = 1.5; g.beginPath(); let st = false;
+      arr.forEach((v, j) => {
+        const gi = j + per - 1 - off; if (gi < 0) return;
+        const x = X(gi), y = Y(v); st ? g.lineTo(x, y) : (g.moveTo(x, y), st = true);
+      });
+      g.stroke(); g.lineWidth = 1;
+    };
+    const f = +$('emaF').value, sl = +$('emaS').value;
+    line(ema(closes, f), f, '#4c8dff'); line(ema(closes, sl), sl, '#ffb84d');
+    markers.forEach(mk => {
+      const idx = candles.findIndex(c => c.t === mk.t) - off; if (idx < 0) return;
+      const x = X(idx), y = Y(mk.price), col = mk.res === 'w' ? UP : mk.res === 'l' ? DN : '#9aa3c7';
+      g.fillStyle = col; g.beginPath();
+      if (mk.side === 'CALL') { g.moveTo(x, y - 9); g.lineTo(x - 6, y + 3); g.lineTo(x + 6, y + 3); }
+      else { g.moveTo(x, y + 9); g.lineTo(x - 6, y - 3); g.lineTo(x + 6, y - 3); }
+      g.closePath(); g.fill();
+    });
+    const yl = Math.round(Y(last.c)) + 0.5;
+    g.setLineDash([4, 4]); g.strokeStyle = tx; g.beginPath(); g.moveTo(padL, yl); g.lineTo(W - padR, yl); g.stroke(); g.setLineDash([]);
+    g.fillStyle = last.c >= last.o ? UP : DN; g.fillRect(W - padR + 2, yl - 8, padR - 4, 16);
+    g.fillStyle = '#fff'; g.fillText(last.c.toFixed(dec), W - padR + 6, yl + 4);
+  }
+
+  setInterval(() => {
+    $('sClock').textContent = new Date().toLocaleTimeString();
+    if (lastOpen !== null) {
+      const left = Math.max(0, lastOpen + (+$('gran').value) - Math.floor(Date.now() / 1000));
+      $('sNext').textContent = Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0');
+    } else $('sNext').textContent = '-';
+  }, 1000);
+  window.addEventListener('resize', redraw);
+  redraw();
+
+  // ---------- VERSI & CHANGELOG ----------
+  // v1.0  Bot dasar EMA + RSI (API lama)
+  // v1.1  Mode Trend + Pullback, jeda setelah kalah
+  // v1.2  Migrasi ke API Deriv baru (PAT + OTP)
+  // v1.3  Tambah market BTC, ETH, forex, emas
+  // v1.4  Grafik candlestick, jam, hitung mundur candle
+  // v1.5  Mode sinyal tiap candle (BUY/SELL) + entry otomatis
+  // v1.6  Deteksi akun lebih kuat, error koneksi tampil di dekat tombol
+  // v1.7  Perbaikan permintaan candle + fallback + log tiap candle
+  // v1.8  Penomoran versi di halaman dan log
+  // v1.9  Durasi otomatis naik bila ditolak, opsi maks kontrak bersamaan
+  // v1.10 Pembersihan input token/App ID, pesan error karakter tidak valid
+  // v1.11 Cek kontrak tersedia (contracts_for), durasi otomatis, tick/hari, blokir market tak didukung
+  const VERSION = 'v1.11', VERSION_DATE = '27 Nov 2026';
+  $('ver').textContent = VERSION;
+  $('ver').title = 'Dirilis ' + VERSION_DATE;
+  log('Deriv Bot Web ' + VERSION + ' (' + VERSION_DATE + ') dimuat');
+
+  $('btnConnect').onclick = connect;
+  $('btnDisc').onclick = disconnect;
+  $('btnStart').onclick = () => {
+    pnl = 0; wins = 0; losses = 0; streak = 0; mgStep = 0; pauseUntil = 0; updateStats();
+    running = true;
+    $('btnStart').disabled = true; $('btnStop').disabled = false;
+    $('sSt').textContent = 'Menunggu sinyal';
+    log('Bot dimulai · ' + $('symbol').value + ' · stake ' + $('stake').value, 'pos');
+    if (!candles.length) log('Peringatan: data candle belum masuk, bot belum bisa entry sampai grafik muncul', 'warn');
+  };
+  $('btnStop').onclick = () => stopBot('Dihentikan manual');
+  $('symbol').onchange = $('gran').onchange = () => { if (authorized) subscribeCandles(); };
+})();
+</script>
+</body>
+</html>
